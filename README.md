@@ -22,12 +22,13 @@ pytest
 ```
 
 On HPC clusters where GPU nodes have no internet, download models on a login node first
-(weights land in the shared Hugging Face cache, typically `~/.cache/huggingface/hub`):
+(weights land in the shared Hugging Face cache, typically `~/.cache/huggingface/hub`).
+Ensure login and GPU nodes share the same home / `HF_HOME`.
 
 ```bash
 # login node (internet)
 python -m experiments.interactive_chat --download-only
 
-# GPU node (no internet)
+# GPU node (no internet) — sets HF_HUB_OFFLINE / TRANSFORMERS_OFFLINE automatically
 python -m experiments.interactive_chat
 ```

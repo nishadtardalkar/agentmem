@@ -3,16 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
-from agentmem.config import MemoryConfig
-from agentmem.session import MemorySession
-
-
-def download_models(config: MemoryConfig) -> None:
+def download_models(config) -> None:
     """Fetch encoder + main LLM into the HF cache (no model load)."""
     from huggingface_hub import snapshot_download
 
@@ -22,7 +17,17 @@ def download_models(config: MemoryConfig) -> None:
         print(f"  cached at {path}")
 
 
-def load_main_llm(config: MemoryConfig):
+def resolve_local_model(model_id: str) -> str:
+    """Resolve a hub id to a local snapshot path (cache must already exist)."""
+    from huggingface_hub import snapshot_download
+
+    return snapshot_download(model_id, local_files_only=True)
+
+
+def load_main_llm(config):
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+
     quant_config = None
     if config.main_load_in_4bit:
         compute_dtype = getattr(torch, config.main_bnb_4bit_compute_dtype)
@@ -33,13 +38,14 @@ def load_main_llm(config: MemoryConfig):
             bnb_4bit_use_double_quant=True,
         )
 
+    model_path = resolve_local_model(config.main_model_id)
     tokenizer = AutoTokenizer.from_pretrained(
-        config.main_model_id,
+        model_path,
         trust_remote_code=True,
         local_files_only=True,
     )
     model = AutoModelForCausalLM.from_pretrained(
-        config.main_model_id,
+        model_path,
         quantization_config=quant_config,
         device_map="auto",
         trust_remote_code=True,
@@ -55,6 +61,8 @@ def generate_reply(
     prompt: str,
     max_new_tokens: int = 512,
 ) -> str:
+    import torch
+
     messages = [{"role": "user", "content": prompt}]
     input_ids = tokenizer.apply_chat_template(
         messages,
@@ -85,7 +93,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--encoder-device",
-        default="cuda" if torch.cuda.is_available() else "cpu",
+        default=None,
+        help="Device for the memory encoder (default: cuda if available else cpu)",
     )
     parser.add_argument("--max-new-tokens", type=int, default=512)
     parser.add_argument(
@@ -99,6 +108,20 @@ def main() -> None:
         help="Download encoder + main LLM into the HF cache and exit (login node)",
     )
     args = parser.parse_args()
+
+    # HF hub offline flags are read at import time — set them before importing
+    # transformers / huggingface_hub on GPU nodes with no internet.
+    if not args.download_only:
+        os.environ["HF_HUB_OFFLINE"] = "1"
+        os.environ["TRANSFORMERS_OFFLINE"] = "1"
+
+    import torch
+
+    from agentmem.config import MemoryConfig
+    from agentmem.session import MemorySession
+
+    if args.encoder_device is None:
+        args.encoder_device = "cuda" if torch.cuda.is_available() else "cpu"
 
     config = MemoryConfig(
         data_dir=args.data_dir,

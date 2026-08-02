@@ -35,6 +35,7 @@ class HiddenStateEncoder:
         dtype: str = "bfloat16",
     ) -> None:
         import torch
+        from huggingface_hub import snapshot_download
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
         self.model_id = model_id
@@ -46,8 +47,11 @@ class HiddenStateEncoder:
             "float32": torch.float32,
         }.get(dtype, torch.bfloat16)
 
+        # Resolve hub id -> local snapshot so load never contacts the network.
+        model_path = snapshot_download(model_id, local_files_only=True)
+
         self.tokenizer = AutoTokenizer.from_pretrained(
-            model_id,
+            model_path,
             trust_remote_code=True,
             local_files_only=True,
         )
@@ -55,7 +59,7 @@ class HiddenStateEncoder:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
         self.model = AutoModelForCausalLM.from_pretrained(
-            model_id,
+            model_path,
             torch_dtype=torch_dtype,
             trust_remote_code=True,
             local_files_only=True,
