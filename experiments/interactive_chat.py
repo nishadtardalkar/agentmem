@@ -64,12 +64,19 @@ def generate_reply(
     import torch
 
     messages = [{"role": "user", "content": prompt}]
-    input_ids = tokenizer.apply_chat_template(
+    # transformers 4.46+ may return BatchEncoding instead of a bare tensor
+    encoded = tokenizer.apply_chat_template(
         messages,
         add_generation_prompt=True,
         return_tensors="pt",
     )
-    input_ids = input_ids.to(model.device)
+    if isinstance(encoded, torch.Tensor):
+        input_ids = encoded
+    else:
+        input_ids = encoded["input_ids"]
+
+    device = next(model.parameters()).device
+    input_ids = input_ids.to(device)
     with torch.no_grad():
         out = model.generate(
             input_ids,
