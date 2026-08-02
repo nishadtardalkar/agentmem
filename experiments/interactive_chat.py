@@ -44,12 +44,16 @@ def load_main_llm(config):
         trust_remote_code=True,
         local_files_only=True,
     )
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
     model = AutoModelForCausalLM.from_pretrained(
         model_path,
         quantization_config=quant_config,
         device_map="auto",
         trust_remote_code=True,
         local_files_only=True,
+        attn_implementation="sdpa",
     )
     model.eval()
     return tokenizer, model
@@ -64,27 +68,27 @@ def generate_reply(
     import torch
 
     messages = [{"role": "user", "content": prompt}]
-    # transformers 4.46+ may return BatchEncoding instead of a bare tensor
-    encoded = tokenizer.apply_chat_template(
+    # Tokenize via the chat string so we always get an explicit attention_mask.
+    # (pad_token == eos_token on Qwen, so generate cannot infer the mask.)
+    chat_text = tokenizer.apply_chat_template(
         messages,
         add_generation_prompt=True,
-        return_tensors="pt",
+        tokenize=False,
     )
-    if isinstance(encoded, torch.Tensor):
-        input_ids = encoded
-    else:
-        input_ids = encoded["input_ids"]
-
+    encoded = tokenizer(chat_text, return_tensors="pt")
     device = next(model.parameters()).device
-    input_ids = input_ids.to(device)
+    input_ids = encoded["input_ids"].to(device)
+    attention_mask = encoded["attention_mask"].to(device)
+
     with torch.no_grad():
         out = model.generate(
             input_ids,
+            attention_mask=attention_mask,
             max_new_tokens=max_new_tokens,
             do_sample=True,
             temperature=0.7,
             top_p=0.9,
-            pad_token_id=tokenizer.eos_token_id,
+            pad_token_id=tokenizer.pad_token_id,
         )
     new_tokens = out[0, input_ids.shape[-1] :]
     return tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
@@ -126,6 +130,10 @@ def main() -> None:
 
     from agentmem.config import MemoryConfig
     from agentmem.session import MemorySession
+
+    # Protect encoder + main LLM from broken cuDNN SDPA backends.
+    if torch.cuda.is_available():
+        torch.backends.cuda.enable_cudnn_sdp(False)
 
     if args.encoder_device is None:
         args.encoder_device = "cuda" if torch.cuda.is_available() else "cpu"
