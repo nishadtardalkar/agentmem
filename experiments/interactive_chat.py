@@ -12,6 +12,16 @@ from agentmem.config import MemoryConfig
 from agentmem.session import MemorySession
 
 
+def download_models(config: MemoryConfig) -> None:
+    """Fetch encoder + main LLM into the HF cache (no model load)."""
+    from huggingface_hub import snapshot_download
+
+    for model_id in (config.encoder_model_id, config.main_model_id):
+        print(f"Downloading {model_id} ...")
+        path = snapshot_download(model_id)
+        print(f"  cached at {path}")
+
+
 def load_main_llm(config: MemoryConfig):
     quant_config = None
     if config.main_load_in_4bit:
@@ -24,13 +34,16 @@ def load_main_llm(config: MemoryConfig):
         )
 
     tokenizer = AutoTokenizer.from_pretrained(
-        config.main_model_id, trust_remote_code=True
+        config.main_model_id,
+        trust_remote_code=True,
+        local_files_only=True,
     )
     model = AutoModelForCausalLM.from_pretrained(
         config.main_model_id,
         quantization_config=quant_config,
         device_map="auto",
         trust_remote_code=True,
+        local_files_only=True,
     )
     model.eval()
     return tokenizer, model
@@ -80,12 +93,21 @@ def main() -> None:
         action="store_true",
         help="Skip loading the 32B model; echo a stub reply (for smoke tests)",
     )
+    parser.add_argument(
+        "--download-only",
+        action="store_true",
+        help="Download encoder + main LLM into the HF cache and exit (login node)",
+    )
     args = parser.parse_args()
 
     config = MemoryConfig(
         data_dir=args.data_dir,
         encoder_device=args.encoder_device,
     )
+    if args.download_only:
+        download_models(config)
+        return
+
     print(f"Loading memory encoder: {config.encoder_model_id} ({config.encoder_dtype})")
     session = MemorySession(config=config)
 

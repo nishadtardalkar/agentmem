@@ -46,7 +46,11 @@ class HiddenStateEncoder:
             "float32": torch.float32,
         }.get(dtype, torch.bfloat16)
 
-        self.tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            model_id,
+            trust_remote_code=True,
+            local_files_only=True,
+        )
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
@@ -54,6 +58,7 @@ class HiddenStateEncoder:
             model_id,
             torch_dtype=torch_dtype,
             trust_remote_code=True,
+            local_files_only=True,
         )
         self.model.to(device)
         self.model.eval()

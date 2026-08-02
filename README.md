@@ -19,5 +19,15 @@ Episodes are formed by semantic sentence breakpoints. Each sentence latent is a 
 ```bash
 pip install -e ".[dev]"
 pytest
+```
+
+On HPC clusters where GPU nodes have no internet, download models on a login node first
+(weights land in the shared Hugging Face cache, typically `~/.cache/huggingface/hub`):
+
+```bash
+# login node (internet)
+python -m experiments.interactive_chat --download-only
+
+# GPU node (no internet)
 python -m experiments.interactive_chat
 ```
