@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from agentmem.bank import EpisodeBank
+from agentmem.bank import EpisodeBank, RetrievedEpisode
 from agentmem.chunker import SemanticChunker
 from agentmem.config import MemoryConfig
 from agentmem.encoder import Encoder, HiddenStateEncoder
@@ -54,3 +54,12 @@ class MemorySession:
     def post(self, assistant_text: str) -> None:
         for episode in self.chunker.chunk(assistant_text, role="assistant"):
             self.bank.upsert(episode)
+
+    def search(self, user_text: str) -> list[RetrievedEpisode]:
+        """Retrieve related episodes without storing. Used by debug /search."""
+        query_keys = self.chunker.query_keys(user_text)
+        return self.bank.search(
+            query_keys,
+            top_k=self.config.retrieve_top_k,
+            threshold=self.config.tau_retrieve,
+        )

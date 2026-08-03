@@ -4,4 +4,7 @@ accelerate
 bitsandbytes
 faiss-cpu
 numpy
+fastapi
+uvicorn
+httpx
 pytest

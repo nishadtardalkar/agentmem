@@ -15,6 +15,9 @@ dependencies = [
   "bitsandbytes",
   "faiss-cpu",
   "numpy",
+  "fastapi",
+  "uvicorn",
+  "httpx",
 ]
 
 [project.optional-dependencies]

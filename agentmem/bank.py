@@ -250,3 +250,25 @@ class EpisodeBank:
             timestamp=row["timestamp"],
             score=1.0,
         )
+
+    def list_episodes(self) -> list[RetrievedEpisode]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM episodes ORDER BY timestamp ASC"
+            ).fetchall()
+        return [
+            RetrievedEpisode(
+                episode_id=row["episode_id"],
+                role=row["role"],
+                text=row["text"],
+                sentences=json.loads(row["sentences_json"]),
+                timestamp=row["timestamp"],
+                score=1.0,
+            )
+            for row in rows
+        ]
+
+    def episode_count(self) -> int:
+        with self._connect() as conn:
+            row = conn.execute("SELECT COUNT(*) AS n FROM episodes").fetchone()
+        return int(row["n"])

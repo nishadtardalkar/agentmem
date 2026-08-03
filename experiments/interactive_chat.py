@@ -1,10 +1,10 @@
-"""Interactive H100 demo: memory session + 4-bit Qwen2.5-32B main LLM."""
+"""Interactive H100 demo: main LLM chat talking to the memory HTTP API."""
 
 from __future__ import annotations
 
 import argparse
 import os
-from pathlib import Path
+import sys
 
 
 def download_models(config) -> None:
@@ -97,15 +97,9 @@ def generate_reply(
 def main() -> None:
     parser = argparse.ArgumentParser(description="AgentMem interactive chat demo")
     parser.add_argument(
-        "--data-dir",
-        type=Path,
-        default=Path("data/memory"),
-        help="Directory for FAISS + SQLite memory store",
-    )
-    parser.add_argument(
-        "--encoder-device",
-        default=None,
-        help="Device for the memory encoder (default: cuda if available else cpu)",
+        "--memory-url",
+        default="http://127.0.0.1:8765",
+        help="Base URL of the memory HTTP server",
     )
     parser.add_argument("--max-new-tokens", type=int, default=512)
     parser.add_argument(
@@ -126,28 +120,29 @@ def main() -> None:
         os.environ["HF_HUB_OFFLINE"] = "1"
         os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
-    import torch
-
     from agentmem.config import MemoryConfig
-    from agentmem.session import MemorySession
+    from experiments.memory_client import MemoryClient, MemoryClientError
 
-    # Protect encoder + main LLM from broken cuDNN SDPA backends.
-    if torch.cuda.is_available():
-        torch.backends.cuda.enable_cudnn_sdp(False)
-
-    if args.encoder_device is None:
-        args.encoder_device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    config = MemoryConfig(
-        data_dir=args.data_dir,
-        encoder_device=args.encoder_device,
-    )
+    config = MemoryConfig()
     if args.download_only:
         download_models(config)
         return
 
-    print(f"Loading memory encoder: {config.encoder_model_id} ({config.encoder_dtype})")
-    session = MemorySession(config=config)
+    import torch
+
+    # Protect main LLM from broken cuDNN SDPA backends.
+    if torch.cuda.is_available():
+        torch.backends.cuda.enable_cudnn_sdp(False)
+
+    client = MemoryClient(base_url=args.memory_url)
+    try:
+        client.health()
+    except MemoryClientError as exc:
+        print(f"Memory server not reachable at {args.memory_url}", file=sys.stderr)
+        print(f"  Start it with: python -m experiments.memory_server", file=sys.stderr)
+        print(f"  ({exc})", file=sys.stderr)
+        client.close()
+        sys.exit(1)
 
     tokenizer = model = None
     if not args.stub_main:
@@ -159,23 +154,32 @@ def main() -> None:
     else:
         print("Using stub main LLM")
 
-    print("Chat ready. Empty line or Ctrl+C to exit.\n")
+    print(f"Chat ready (memory @ {args.memory_url}). Empty line or Ctrl+C to exit.\n")
     try:
         while True:
             user_text = input("You: ").strip()
             if not user_text:
                 break
-            augmented = session.pre(user_text)
+            try:
+                augmented = client.pre(user_text)
+            except MemoryClientError as exc:
+                print(f"Memory /pre failed: {exc}", file=sys.stderr)
+                continue
             if args.stub_main:
                 reply = f"[stub] Heard: {user_text[:120]}"
             else:
                 reply = generate_reply(
                     tokenizer, model, augmented, max_new_tokens=args.max_new_tokens
                 )
-            session.post(reply)
+            try:
+                client.post(reply)
+            except MemoryClientError as exc:
+                print(f"Memory /post failed: {exc}", file=sys.stderr)
             print(f"Assistant: {reply}\n")
     except (KeyboardInterrupt, EOFError):
         print("\nBye.")
+    finally:
+        client.close()
 
 
 if __name__ == "__main__":

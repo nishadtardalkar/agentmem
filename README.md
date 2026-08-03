@@ -27,8 +27,20 @@ Ensure login and GPU nodes share the same home / `HF_HOME`.
 
 ```bash
 # login node (internet)
+python -m experiments.memory_server --download-only
 python -m experiments.interactive_chat --download-only
 
-# GPU node (no internet) — sets HF_HUB_OFFLINE / TRANSFORMERS_OFFLINE automatically
+# GPU node — three separate processes (memory loads the encoder; chat loads the 32B)
+
+# terminal 1 — memory HTTP API (default http://127.0.0.1:8765)
+python -m experiments.memory_server --data-dir data/memory
+
+# terminal 2 — chat (talks to memory over HTTP)
 python -m experiments.interactive_chat
+
+# terminal 3 — optional debug REPL (same API)
+python -m experiments.memory_debug
 ```
+
+Memory server flags: `--host`, `--port`, `--data-dir`, `--encoder-device`.
+Chat / debug flag: `--memory-url` (default `http://127.0.0.1:8765`).
