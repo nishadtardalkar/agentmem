@@ -68,7 +68,7 @@ def test_bank_insert_and_retrieve(tmp_bank: EpisodeBank, encoder: HashEncoder):
 
     hits = tmp_bank.search(z, top_k=3, threshold=0.5)
     assert len(hits) == 1
-    assert hits[0].text == "I live in Boston."
+    assert hits[0].text == f"[{ep.timestamp}] I live in Boston."
     assert hits[0].episode_id == eid
 
 
@@ -109,7 +109,8 @@ def test_bank_append_on_high_similarity(tmp_path: Path, encoder: HashEncoder):
     assert id1 == id2
     row = bank.get_episode(id1)
     assert row is not None
-    assert "soft" in row.text and "purr" in row.text
+    assert f"[{e1.timestamp}] Cats are soft." in row.text
+    assert f"[{e2.timestamp}] Cats purr loudly." in row.text
     assert bank.ntotal == 2
 
 
@@ -120,7 +121,7 @@ def test_readout_compose():
         RetrievedEpisode(
             episode_id="1",
             role="user",
-            text="I live in Boston.",
+            text="[t] I live in Boston.",
             sentences=["I live in Boston."],
             timestamp="t",
             score=0.9,
@@ -131,6 +132,7 @@ def test_readout_compose():
     prompt = compose_prompt(block, "Where do I live?")
     assert prompt.endswith("Where do I live?")
     assert "Boston" in prompt
+    assert "[t]" in prompt
 
 
 def test_session_pre_post(tmp_path: Path, encoder: HashEncoder):

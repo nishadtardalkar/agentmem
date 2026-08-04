@@ -131,10 +131,16 @@ class EpisodeBank:
             )
             return cur.fetchone()
 
+    @staticmethod
+    def _stamped_value(episode: Episode) -> str:
+        """Episode value text with timestamp baked in."""
+        return f"[{episode.timestamp}] {episode.text}".strip()
+
     def upsert(self, episode: Episode) -> str:
         """Insert a new episode or append into a similar existing one. Returns episode_id."""
         keys = episode.keys
         match_id, best_sim = self._best_match(keys)
+        stamped = self._stamped_value(episode)
 
         if match_id is not None and best_sim >= self.tau_upsert:
             row = self._get_episode_row(match_id)
@@ -145,7 +151,7 @@ class EpisodeBank:
                 existing_sents = json.loads(row["sentences_json"])
                 new_sents = list(episode.sentences)
                 merged_sents = existing_sents + new_sents
-                merged_text = (row["text"].rstrip() + " " + episode.text).strip()
+                merged_text = (row["text"].rstrip() + " " + stamped).strip()
                 with self._connect() as conn:
                     conn.execute(
                         """
@@ -175,7 +181,7 @@ class EpisodeBank:
                 (
                     episode_id,
                     episode.role,
-                    episode.text,
+                    stamped,
                     json.dumps(list(episode.sentences)),
                     episode.timestamp,
                 ),
