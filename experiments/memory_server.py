@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+
+logger = logging.getLogger("agentmem.server")
 
 
 class TextBody(BaseModel):
@@ -27,6 +30,13 @@ def _episode_to_dict(ep, *, include_score: bool = False) -> dict:
     return payload
 
 
+def _text_preview(text: str, limit: int = 120) -> str:
+    text = text.replace("\n", " ").strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3] + "..."
+
+
 def create_app(session) -> FastAPI:
     app = FastAPI(title="AgentMem Memory Server")
 
@@ -36,12 +46,28 @@ def create_app(session) -> FastAPI:
 
     @app.post("/pre")
     def pre(body: TextBody) -> dict:
-        prompt = session.pre(body.text)
+        try:
+            prompt = session.pre(body.text)
+        except Exception:
+            logger.exception(
+                "/pre failed (chars=%d preview=%r)",
+                len(body.text),
+                _text_preview(body.text),
+            )
+            raise HTTPException(status_code=500, detail="/pre failed") from None
         return {"prompt": prompt}
 
     @app.post("/post")
     def post(body: TextBody) -> dict:
-        session.post(body.text)
+        try:
+            session.post(body.text)
+        except Exception:
+            logger.exception(
+                "/post failed (chars=%d preview=%r)",
+                len(body.text),
+                _text_preview(body.text),
+            )
+            raise HTTPException(status_code=500, detail="/post failed") from None
         return {"ok": True}
 
     @app.get("/stats")
@@ -65,7 +91,15 @@ def create_app(session) -> FastAPI:
 
     @app.post("/search")
     def search(body: TextBody) -> dict:
-        hits = session.search(body.text)
+        try:
+            hits = session.search(body.text)
+        except Exception:
+            logger.exception(
+                "/search failed (chars=%d preview=%r)",
+                len(body.text),
+                _text_preview(body.text),
+            )
+            raise HTTPException(status_code=500, detail="/search failed") from None
         return {"hits": [_episode_to_dict(ep, include_score=True) for ep in hits]}
 
     return app
@@ -121,6 +155,12 @@ def main() -> None:
         path = snapshot_download(config.encoder_model_id)
         print(f"  cached at {path}")
         return
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+        force=True,
+    )
 
     print(f"Loading memory encoder: {config.encoder_model_id} ({config.encoder_dtype})")
     session = MemorySession(config=config)

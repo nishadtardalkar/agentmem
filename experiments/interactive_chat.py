@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sys
+
+logger = logging.getLogger("agentmem.chat")
 
 
 def download_models(config) -> None:
@@ -163,6 +166,7 @@ def main() -> None:
             try:
                 augmented = client.pre(user_text)
             except MemoryClientError as exc:
+                logger.exception("Memory /pre failed: %s", exc)
                 print(f"Memory /pre failed: {exc}", file=sys.stderr)
                 continue
             if args.stub_main:
@@ -174,6 +178,7 @@ def main() -> None:
             try:
                 client.post(reply)
             except MemoryClientError as exc:
+                logger.exception("Memory /post failed: %s", exc)
                 print(f"Memory /post failed: {exc}", file=sys.stderr)
             print(f"Assistant: {reply}\n")
     except (KeyboardInterrupt, EOFError):
@@ -183,4 +188,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    )
     main()
