@@ -50,8 +50,8 @@ def run_repl(client) -> None:
                 break
             if cmd == "stats":
                 s = client.stats()
-                n = s.get("latents", s.get("episodes", 0))
-                print(f"  latents={n}  keys={s['keys']}")
+                n = s.get("episodes", s.get("latents", 0))
+                print(f"  episodes={n}  keys={s['keys']}")
             elif cmd == "list":
                 buckets = client.list_latents()
                 if not buckets:
@@ -60,7 +60,7 @@ def run_repl(client) -> None:
                     print(f"  {b['latent_id']}  {_entry_preview(b)}")
             elif cmd == "show":
                 if not arg:
-                    print("  usage: show <latent_id>")
+                    print("  usage: show <episode_id>")
                     continue
                 bucket = client.get_latent(arg)
                 print(json.dumps(bucket, indent=2))
@@ -79,9 +79,9 @@ def run_repl(client) -> None:
                 print(
                     textwrap.dedent(
                         """\
-                        stats          bank size (latent buckets + FAISS keys)
-                        list           list latent buckets
-                        show <id>      full latent bucket JSON (entries array)
+                        stats          bank size (episodes + FAISS keys)
+                        list           list stored episodes
+                        show <id>      full episode JSON
                         search <text>  retrieve-only search with scores
                         quit           exit
                         """

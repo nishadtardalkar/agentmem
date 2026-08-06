@@ -5,7 +5,10 @@ Dual-path latent memory manager that sits before and after a main LLM.
 - **Pre-path:** extract key tokens (via the encoder instruct model), retrieve related episodes from those token embeddings, return chat messages with memory in the **system** role and the live user text in the **user** role, then chunk and store the user half-turn.
 - **Post-path:** chunk and store the assistant half-turn (store only).
 
-Episodes are formed by semantic sentence breakpoints. FAISS keys are embeddings of **model-extracted key tokens** (not whole-sentence vectors); similar keys share a **latent bucket** whose value is an array of memory objects `{ts, role, text, sentences, ...}`.
+Episodes are formed by semantic sentence breakpoints (`tau_break`). Each episode is
+always stored as its own memory value `{ts, role, text, sentences, ...}`. FAISS holds
+embeddings of **model-extracted key tokens** from that episode; every key points at the
+same episode so subject tokens can retrieve related memories without merging values.
 
 ## H100 demo models
 
@@ -45,7 +48,7 @@ python -m experiments.memory_debug
 Memory server flags: `--host`, `--port`, `--data-dir`, `--encoder-device`.
 Chat / debug flag: `--memory-url` (default `http://127.0.0.1:8765`).
 
-### Upgrading from sentence-key indexes
+### Upgrading memory indexes
 
-Token-key FAISS indexes are incompatible with older sentence-level keys. Clear the memory
-data directory (e.g. delete `data/memory`) before starting the server after this change.
+Schema / key layout changes require a clean store. Clear the memory data directory
+(e.g. delete `data/memory`) before restarting the server after this change.

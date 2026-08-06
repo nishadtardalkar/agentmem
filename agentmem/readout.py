@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from agentmem.bank import RetrievedBucket
+from agentmem.bank import RetrievedEpisode
 
 _SYSTEM_INTRO = (
     "You are a helpful assistant. Recalled memories below are prior context from "
@@ -10,25 +10,25 @@ _SYSTEM_INTRO = (
 
 
 def format_memory_block(
-    buckets: list[RetrievedBucket],
+    episodes: list[RetrievedEpisode],
     max_chars: int = 2000,
 ) -> str:
-    if not buckets:
+    if not episodes:
         return ""
 
     lines: list[str] = ["[Memory]"]
     used = len(lines[0]) + 1
-    for bucket in buckets:
-        for entry in bucket.entries:
-            snippet = entry.text.strip()
-            line = f"- ({entry.role}) {snippet}"
-            if used + len(line) + 1 > max_chars:
-                remaining = max_chars - used - 1
-                if remaining > 20:
-                    lines.append(line[:remaining].rstrip() + "…")
-                return "\n".join(lines + ["[/Memory]"])
-            lines.append(line)
-            used += len(line) + 1
+    for hit in episodes:
+        entry = hit.entry
+        snippet = entry.text.strip()
+        line = f"- ({entry.role}) {snippet}"
+        if used + len(line) + 1 > max_chars:
+            remaining = max_chars - used - 1
+            if remaining > 20:
+                lines.append(line[:remaining].rstrip() + "…")
+            return "\n".join(lines + ["[/Memory]"])
+        lines.append(line)
+        used += len(line) + 1
 
     lines.append("[/Memory]")
     return "\n".join(lines)

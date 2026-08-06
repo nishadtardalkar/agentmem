@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 
 import faiss
@@ -14,7 +14,7 @@ from agentmem.chunker import Episode
 
 @dataclass
 class MemoryEntry:
-    """One memory object stored under a latent bucket."""
+    """One stored episode (the memory value)."""
 
     role: str
     text: str
@@ -23,31 +23,45 @@ class MemoryEntry:
 
 
 @dataclass
-class RetrievedBucket:
-    """A latent bucket and the memory objects that fall into it."""
+class RetrievedEpisode:
+    """An episode retrieved via the token-key index."""
 
-    latent_id: str
-    entries: list[MemoryEntry]
+    episode_id: str
+    entry: MemoryEntry
     score: float = 1.0
+
+    # Back-compat aliases used by readout / HTTP layer.
+    @property
+    def latent_id(self) -> str:
+        return self.episode_id
+
+    @property
+    def entries(self) -> list[MemoryEntry]:
+        return [self.entry]
+
+
+# Back-compat name
+RetrievedBucket = RetrievedEpisode
 
 
 class EpisodeBank:
-    """FAISS token keys → latent_id → [MemoryEntry, ...]."""
+    """Store: episode values. Index: FAISS token keys → episode_id."""
 
-    def __init__(self, dim: int, data_dir: Path, tau_upsert: float = 0.75) -> None:
+    def __init__(self, dim: int, data_dir: Path) -> None:
         self.dim = dim
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        self.tau_upsert = tau_upsert
 
         self.faiss_path = self.data_dir / "keys.faiss"
         self.sqlite_path = self.data_dir / "episodes.db"
         self.id_map_path = self.data_dir / "faiss_ids.json"
 
         self._index = self._load_or_create_index()
-        self._faiss_id_to_latent: dict[int, str] = self._load_id_map()
+        self._faiss_id_to_episode: dict[int, str] = self._load_id_map()
         self._next_faiss_id = (
-            (max(self._faiss_id_to_latent.keys()) + 1) if self._faiss_id_to_latent else 0
+            (max(self._faiss_id_to_episode.keys()) + 1)
+            if self._faiss_id_to_episode
+            else 0
         )
         self._init_db()
 
@@ -69,7 +83,7 @@ class EpisodeBank:
         return {int(k): v for k, v in raw.items()}
 
     def _save_id_map(self) -> None:
-        payload = {str(k): v for k, v in self._faiss_id_to_latent.items()}
+        payload = {str(k): v for k, v in self._faiss_id_to_episode.items()}
         self.id_map_path.write_text(json.dumps(payload), encoding="utf-8")
 
     def _connect(self) -> sqlite3.Connection:
@@ -79,16 +93,19 @@ class EpisodeBank:
 
     def _init_db(self) -> None:
         with self._connect() as conn:
+            # Drop legacy shapes (merged latent buckets / flat-incompatible).
+            conn.execute("DROP TABLE IF EXISTS latents")
             conn.execute(
                 """
-                CREATE TABLE IF NOT EXISTS latents (
-                    latent_id TEXT PRIMARY KEY,
-                    entries_json TEXT NOT NULL
+                CREATE TABLE IF NOT EXISTS episodes (
+                    episode_id TEXT PRIMARY KEY,
+                    role TEXT NOT NULL,
+                    text TEXT NOT NULL,
+                    sentences_json TEXT NOT NULL,
+                    ts TEXT NOT NULL
                 )
                 """
             )
-            # Drop legacy flat-episode table if present (incompatible shape).
-            conn.execute("DROP TABLE IF EXISTS episodes")
             conn.commit()
 
     def save(self) -> None:
@@ -99,28 +116,7 @@ class EpisodeBank:
     def ntotal(self) -> int:
         return int(self._index.ntotal)
 
-    def _best_match(self, keys: np.ndarray) -> tuple[str | None, float]:
-        if self._index.ntotal == 0 or keys.size == 0:
-            return None, -1.0
-
-        keys = np.ascontiguousarray(keys.astype(np.float32))
-        if keys.ndim == 1:
-            keys = keys.reshape(1, -1)
-
-        scores, ids = self._index.search(keys, 1)
-        best_latent: str | None = None
-        best_score = -1.0
-        for row_scores, row_ids in zip(scores, ids):
-            fid = int(row_ids[0])
-            score = float(row_scores[0])
-            if fid < 0:
-                continue
-            if score > best_score:
-                best_score = score
-                best_latent = self._faiss_id_to_latent.get(fid)
-        return best_latent, best_score
-
-    def _add_keys(self, latent_id: str, keys: np.ndarray) -> None:
+    def _add_keys(self, episode_id: str, keys: np.ndarray) -> None:
         if keys.size == 0:
             return
         keys = np.ascontiguousarray(keys.astype(np.float32))
@@ -130,13 +126,13 @@ class EpisodeBank:
         ids = np.arange(self._next_faiss_id, self._next_faiss_id + n, dtype=np.int64)
         self._index.add_with_ids(keys, ids)
         for fid in ids:
-            self._faiss_id_to_latent[int(fid)] = latent_id
+            self._faiss_id_to_episode[int(fid)] = episode_id
         self._next_faiss_id += n
 
-    def _get_latent_row(self, latent_id: str) -> sqlite3.Row | None:
+    def _get_episode_row(self, episode_id: str) -> sqlite3.Row | None:
         with self._connect() as conn:
             cur = conn.execute(
-                "SELECT * FROM latents WHERE latent_id = ?", (latent_id,)
+                "SELECT * FROM episodes WHERE episode_id = ?", (episode_id,)
             )
             return cur.fetchone()
 
@@ -150,82 +146,59 @@ class EpisodeBank:
         )
 
     @staticmethod
-    def _parse_entries(raw: str) -> list[MemoryEntry]:
-        data = json.loads(raw)
-        return [
-            MemoryEntry(
-                role=item["role"],
-                text=item["text"],
-                sentences=list(item["sentences"]),
-                ts=item["ts"],
-            )
-            for item in data
-        ]
+    def _entry_from_row(row: sqlite3.Row) -> MemoryEntry:
+        return MemoryEntry(
+            role=row["role"],
+            text=row["text"],
+            sentences=list(json.loads(row["sentences_json"])),
+            ts=row["ts"],
+        )
 
-    @staticmethod
-    def _dump_entries(entries: list[MemoryEntry]) -> str:
-        return json.dumps([asdict(e) for e in entries])
-
-    def _row_to_bucket(
+    def _row_to_retrieved(
         self, row: sqlite3.Row, *, score: float = 1.0
-    ) -> RetrievedBucket:
-        return RetrievedBucket(
-            latent_id=row["latent_id"],
-            entries=self._parse_entries(row["entries_json"]),
+    ) -> RetrievedEpisode:
+        return RetrievedEpisode(
+            episode_id=row["episode_id"],
+            entry=self._entry_from_row(row),
             score=score,
         )
 
-    def upsert(self, episode: Episode) -> str:
-        """Insert a new latent bucket or append an entry into a similar one.
+    def store(self, episode: Episode) -> str:
+        """Always insert the episode as a new value; index its token keys to it.
 
-        Returns the latent_id of the bucket that received the entry.
+        Returns the episode_id.
         """
-        keys = episode.keys
-        match_id, best_sim = self._best_match(keys)
+        episode_id = episode.episode_id or str(uuid.uuid4())
         entry = self._entry_from_episode(episode)
-
-        if match_id is not None and best_sim >= self.tau_upsert:
-            row = self._get_latent_row(match_id)
-            if row is None:
-                # stale map entry; fall through to insert
-                pass
-            else:
-                entries = self._parse_entries(row["entries_json"])
-                entries.append(entry)
-                with self._connect() as conn:
-                    conn.execute(
-                        """
-                        UPDATE latents
-                        SET entries_json = ?
-                        WHERE latent_id = ?
-                        """,
-                        (self._dump_entries(entries), match_id),
-                    )
-                    conn.commit()
-                self._add_keys(match_id, keys)
-                self.save()
-                return match_id
-
-        latent_id = episode.episode_id or str(uuid.uuid4())
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO latents (latent_id, entries_json)
-                VALUES (?, ?)
+                INSERT INTO episodes (episode_id, role, text, sentences_json, ts)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (latent_id, self._dump_entries([entry])),
+                (
+                    episode_id,
+                    entry.role,
+                    entry.text,
+                    json.dumps(entry.sentences),
+                    entry.ts,
+                ),
             )
             conn.commit()
-        self._add_keys(latent_id, keys)
+        self._add_keys(episode_id, episode.keys)
         self.save()
-        return latent_id
+        return episode_id
+
+    # Back-compat name used by session / older call sites.
+    def upsert(self, episode: Episode) -> str:
+        return self.store(episode)
 
     def search(
         self,
         query_keys: np.ndarray,
         top_k: int = 5,
         threshold: float = 0.70,
-    ) -> list[RetrievedBucket]:
+    ) -> list[RetrievedEpisode]:
         if self._index.ntotal == 0 or query_keys.size == 0:
             return []
 
@@ -236,7 +209,7 @@ class EpisodeBank:
         k = min(top_k, self._index.ntotal)
         scores, ids = self._index.search(query_keys, k)
 
-        best_by_latent: dict[str, float] = {}
+        best_by_episode: dict[str, float] = {}
         for row_scores, row_ids in zip(scores, ids):
             for score, fid in zip(row_scores, row_ids):
                 fid_i = int(fid)
@@ -245,52 +218,48 @@ class EpisodeBank:
                 sc = float(score)
                 if sc < threshold:
                     continue
-                latent_id = self._faiss_id_to_latent.get(fid_i)
-                if latent_id is None:
+                episode_id = self._faiss_id_to_episode.get(fid_i)
+                if episode_id is None:
                     continue
-                prev = best_by_latent.get(latent_id)
+                prev = best_by_episode.get(episode_id)
                 if prev is None or sc > prev:
-                    best_by_latent[latent_id] = sc
+                    best_by_episode[episode_id] = sc
 
-        results: list[RetrievedBucket] = []
-        for latent_id, score in sorted(
-            best_by_latent.items(), key=lambda x: x[1], reverse=True
+        results: list[RetrievedEpisode] = []
+        for episode_id, score in sorted(
+            best_by_episode.items(), key=lambda x: x[1], reverse=True
         ):
-            row = self._get_latent_row(latent_id)
+            row = self._get_episode_row(episode_id)
             if row is None:
                 continue
-            results.append(self._row_to_bucket(row, score=score))
+            results.append(self._row_to_retrieved(row, score=score))
             if len(results) >= top_k:
                 break
         return results
 
-    def get_latent(self, latent_id: str) -> RetrievedBucket | None:
-        row = self._get_latent_row(latent_id)
+    def get_episode(self, episode_id: str) -> RetrievedEpisode | None:
+        row = self._get_episode_row(episode_id)
         if row is None:
             return None
-        return self._row_to_bucket(row)
+        return self._row_to_retrieved(row)
 
-    # Back-compat aliases used by the HTTP API / debug REPL.
-    def get_episode(self, latent_id: str) -> RetrievedBucket | None:
-        return self.get_latent(latent_id)
+    def get_latent(self, latent_id: str) -> RetrievedEpisode | None:
+        return self.get_episode(latent_id)
 
-    def list_latents(self) -> list[RetrievedBucket]:
+    def list_episodes(self) -> list[RetrievedEpisode]:
         with self._connect() as conn:
-            rows = conn.execute("SELECT * FROM latents").fetchall()
-        buckets = [self._row_to_bucket(row) for row in rows]
-        # Order by earliest entry timestamp within each bucket.
-        buckets.sort(
-            key=lambda b: b.entries[0].ts if b.entries else "",
-        )
-        return buckets
+            rows = conn.execute(
+                "SELECT * FROM episodes ORDER BY ts ASC"
+            ).fetchall()
+        return [self._row_to_retrieved(row) for row in rows]
 
-    def list_episodes(self) -> list[RetrievedBucket]:
-        return self.list_latents()
-
-    def latent_count(self) -> int:
-        with self._connect() as conn:
-            row = conn.execute("SELECT COUNT(*) AS n FROM latents").fetchone()
-        return int(row["n"])
+    def list_latents(self) -> list[RetrievedEpisode]:
+        return self.list_episodes()
 
     def episode_count(self) -> int:
-        return self.latent_count()
+        with self._connect() as conn:
+            row = conn.execute("SELECT COUNT(*) AS n FROM episodes").fetchone()
+        return int(row["n"])
+
+    def latent_count(self) -> int:
+        return self.episode_count()

@@ -77,8 +77,10 @@ def create_app(session) -> FastAPI:
 
     @app.get("/stats")
     def stats() -> dict:
+        n = session.bank.episode_count()
         return {
-            "latents": session.bank.latent_count(),
+            "episodes": n,
+            "latents": n,  # back-compat
             "keys": session.bank.ntotal,
         }
 
