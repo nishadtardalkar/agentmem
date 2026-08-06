@@ -15,10 +15,23 @@ def _truncate(text: str, width: int = 80) -> str:
     return text[: width - 3] + "..."
 
 
+def _entry_preview(bucket: dict) -> str:
+    entries = bucket.get("entries") or []
+    if not entries:
+        return "(empty)"
+    first = entries[0]
+    n = len(entries)
+    preview = _truncate(first.get("text", ""))
+    suffix = f" (+{n - 1} more)" if n > 1 else ""
+    return f"{first.get('role', '?'):9}  {preview}{suffix}"
+
+
 def run_repl(client) -> None:
     from experiments.memory_client import MemoryClientError
 
-    print("Memory debug REPL. Commands: stats | list | show <id> | search <text> | quit\n")
+    print(
+        "Memory debug REPL. Commands: stats | list | show <id> | search <text> | quit\n"
+    )
     while True:
         try:
             line = input("dbg> ").strip()
@@ -37,22 +50,20 @@ def run_repl(client) -> None:
                 break
             if cmd == "stats":
                 s = client.stats()
-                print(f"  episodes={s['episodes']}  keys={s['keys']}")
+                n = s.get("latents", s.get("episodes", 0))
+                print(f"  latents={n}  keys={s['keys']}")
             elif cmd == "list":
-                eps = client.list_episodes()
-                if not eps:
+                buckets = client.list_latents()
+                if not buckets:
                     print("  (empty)")
-                for ep in eps:
-                    print(
-                        f"  {ep['episode_id']}  {ep['role']:9}  "
-                        f"{_truncate(ep['text'])}"
-                    )
+                for b in buckets:
+                    print(f"  {b['latent_id']}  {_entry_preview(b)}")
             elif cmd == "show":
                 if not arg:
-                    print("  usage: show <episode_id>")
+                    print("  usage: show <latent_id>")
                     continue
-                ep = client.get_episode(arg)
-                print(json.dumps(ep, indent=2))
+                bucket = client.get_latent(arg)
+                print(json.dumps(bucket, indent=2))
             elif cmd == "search":
                 if not arg:
                     print("  usage: search <text>")
@@ -62,16 +73,15 @@ def run_repl(client) -> None:
                     print("  (no hits)")
                 for h in hits:
                     print(
-                        f"  {h['score']:.3f}  {h['episode_id'][:8]}  {h['role']:9}  "
-                        f"{_truncate(h['text'])}"
+                        f"  {h['score']:.3f}  {h['latent_id'][:8]}  {_entry_preview(h)}"
                     )
             elif cmd == "help":
                 print(
                     textwrap.dedent(
                         """\
-                        stats          bank size (episodes + FAISS keys)
-                        list           list episodes
-                        show <id>      full episode JSON
+                        stats          bank size (latent buckets + FAISS keys)
+                        list           list latent buckets
+                        show <id>      full latent bucket JSON (entries array)
                         search <text>  retrieve-only search with scores
                         quit           exit
                         """

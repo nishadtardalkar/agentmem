@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from agentmem.bank import EpisodeBank, RetrievedEpisode
+from agentmem.bank import EpisodeBank, RetrievedBucket
 from agentmem.chunker import SemanticChunker
 from agentmem.config import MemoryConfig
 from agentmem.encoder import Encoder, HiddenStateEncoder
@@ -55,8 +55,8 @@ class MemorySession:
         for episode in self.chunker.chunk(assistant_text, role="assistant"):
             self.bank.upsert(episode)
 
-    def search(self, user_text: str) -> list[RetrievedEpisode]:
-        """Retrieve related episodes without storing. Used by debug /search."""
+    def search(self, user_text: str) -> list[RetrievedBucket]:
+        """Retrieve related latent buckets without storing. Used by debug /search."""
         query_keys = self.chunker.query_keys(user_text)
         return self.bank.search(
             query_keys,

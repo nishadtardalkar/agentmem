@@ -17,16 +17,21 @@ class TextBody(BaseModel):
     text: str
 
 
-def _episode_to_dict(ep, *, include_score: bool = False) -> dict:
+def _bucket_to_dict(bucket, *, include_score: bool = False) -> dict:
     payload = {
-        "episode_id": ep.episode_id,
-        "role": ep.role,
-        "text": ep.text,
-        "sentences": ep.sentences,
-        "timestamp": ep.timestamp,
+        "latent_id": bucket.latent_id,
+        "entries": [
+            {
+                "role": e.role,
+                "text": e.text,
+                "sentences": e.sentences,
+                "ts": e.ts,
+            }
+            for e in bucket.entries
+        ],
     }
     if include_score:
-        payload["score"] = ep.score
+        payload["score"] = bucket.score
     return payload
 
 
@@ -73,21 +78,34 @@ def create_app(session) -> FastAPI:
     @app.get("/stats")
     def stats() -> dict:
         return {
-            "episodes": session.bank.episode_count(),
+            "latents": session.bank.latent_count(),
             "keys": session.bank.ntotal,
         }
 
+    @app.get("/latents")
+    def list_latents() -> dict:
+        buckets = session.bank.list_latents()
+        return {"latents": [_bucket_to_dict(b) for b in buckets]}
+
+    @app.get("/latents/{latent_id}")
+    def get_latent(latent_id: str) -> dict:
+        bucket = session.bank.get_latent(latent_id)
+        if bucket is None:
+            raise HTTPException(status_code=404, detail="latent not found")
+        return _bucket_to_dict(bucket)
+
+    # Back-compat aliases
     @app.get("/episodes")
     def list_episodes() -> dict:
-        eps = session.bank.list_episodes()
-        return {"episodes": [_episode_to_dict(ep) for ep in eps]}
+        buckets = session.bank.list_latents()
+        return {"episodes": [_bucket_to_dict(b) for b in buckets]}
 
     @app.get("/episodes/{episode_id}")
     def get_episode(episode_id: str) -> dict:
-        ep = session.bank.get_episode(episode_id)
-        if ep is None:
-            raise HTTPException(status_code=404, detail="episode not found")
-        return _episode_to_dict(ep)
+        bucket = session.bank.get_latent(episode_id)
+        if bucket is None:
+            raise HTTPException(status_code=404, detail="latent not found")
+        return _bucket_to_dict(bucket)
 
     @app.post("/search")
     def search(body: TextBody) -> dict:
@@ -100,7 +118,7 @@ def create_app(session) -> FastAPI:
                 _text_preview(body.text),
             )
             raise HTTPException(status_code=500, detail="/search failed") from None
-        return {"hits": [_episode_to_dict(ep, include_score=True) for ep in hits]}
+        return {"hits": [_bucket_to_dict(b, include_score=True) for b in hits]}
 
     return app
 

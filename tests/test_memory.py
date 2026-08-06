@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from agentmem.bank import EpisodeBank
+from agentmem.bank import EpisodeBank, MemoryEntry, RetrievedBucket
 from agentmem.chunker import Episode, SemanticChunker, split_sentences
 from agentmem.config import MemoryConfig
 from agentmem.encoder import HashEncoder, l2_normalize
@@ -62,17 +62,19 @@ def test_bank_insert_and_retrieve(tmp_bank: EpisodeBank, encoder: HashEncoder):
         sentences=["I live in Boston."],
         latents=z,
     )
-    eid = tmp_bank.upsert(ep)
-    assert eid
+    lid = tmp_bank.upsert(ep)
+    assert lid
     assert tmp_bank.ntotal == 1
 
     hits = tmp_bank.search(z, top_k=3, threshold=0.5)
     assert len(hits) == 1
-    assert hits[0].text == f"[{ep.timestamp}] I live in Boston."
-    assert hits[0].episode_id == eid
+    assert hits[0].latent_id == lid
+    assert len(hits[0].entries) == 1
+    assert hits[0].entries[0].text == "I live in Boston."
+    assert hits[0].entries[0].ts == ep.timestamp
 
 
-def test_bank_multi_key_same_episode(tmp_bank: EpisodeBank, encoder: HashEncoder):
+def test_bank_multi_key_same_latent(tmp_bank: EpisodeBank, encoder: HashEncoder):
     sents = ["I live in Boston.", "I have a dog named Rex."]
     z = encoder.encode_many(sents)
     ep = Episode(
@@ -81,14 +83,14 @@ def test_bank_multi_key_same_episode(tmp_bank: EpisodeBank, encoder: HashEncoder
         sentences=sents,
         latents=z,
     )
-    eid = tmp_bank.upsert(ep)
+    lid = tmp_bank.upsert(ep)
     assert tmp_bank.ntotal == 2
 
-    # Query with only the second sentence key still returns full episode
+    # Query with only the second sentence key still returns the full bucket
     hits = tmp_bank.search(z[1:2], top_k=3, threshold=0.5)
     assert len(hits) == 1
-    assert hits[0].episode_id == eid
-    assert "Boston" in hits[0].text and "Rex" in hits[0].text
+    assert hits[0].latent_id == lid
+    assert "Boston" in hits[0].entries[0].text and "Rex" in hits[0].entries[0].text
 
 
 def test_bank_append_on_high_similarity(tmp_path: Path, encoder: HashEncoder):
@@ -107,32 +109,38 @@ def test_bank_append_on_high_similarity(tmp_path: Path, encoder: HashEncoder):
     )
     id2 = bank.upsert(e2)
     assert id1 == id2
-    row = bank.get_episode(id1)
-    assert row is not None
-    assert f"[{e1.timestamp}] Cats are soft." in row.text
-    assert f"[{e2.timestamp}] Cats purr loudly." in row.text
+    bucket = bank.get_latent(id1)
+    assert bucket is not None
+    assert len(bucket.entries) == 2
+    assert bucket.entries[0].text == "Cats are soft."
+    assert bucket.entries[0].ts == e1.timestamp
+    assert bucket.entries[1].text == "Cats purr loudly."
+    assert bucket.entries[1].ts == e2.timestamp
     assert bank.ntotal == 2
+    assert bank.latent_count() == 1
 
 
 def test_readout_compose():
-    from agentmem.bank import RetrievedEpisode
-
-    eps = [
-        RetrievedEpisode(
-            episode_id="1",
-            role="user",
-            text="[t] I live in Boston.",
-            sentences=["I live in Boston."],
-            timestamp="t",
+    buckets = [
+        RetrievedBucket(
+            latent_id="1",
+            entries=[
+                MemoryEntry(
+                    role="user",
+                    text="I live in Boston.",
+                    sentences=["I live in Boston."],
+                    ts="t",
+                )
+            ],
             score=0.9,
         )
     ]
-    block = format_memory_block(eps)
+    block = format_memory_block(buckets)
     assert "[Memory]" in block
+    assert "Boston" in block
     prompt = compose_prompt(block, "Where do I live?")
     assert prompt.endswith("Where do I live?")
     assert "Boston" in prompt
-    assert "[t]" in prompt
 
 
 def test_session_pre_post(tmp_path: Path, encoder: HashEncoder):

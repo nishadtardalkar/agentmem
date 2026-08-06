@@ -54,12 +54,20 @@ class MemoryClient:
     def stats(self) -> dict[str, int]:
         return self._request("GET", "/stats")
 
+    def list_latents(self) -> list[dict[str, Any]]:
+        data = self._request("GET", "/latents")
+        return data["latents"]
+
+    def get_latent(self, latent_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/latents/{latent_id}")
+
     def list_episodes(self) -> list[dict[str, Any]]:
-        data = self._request("GET", "/episodes")
-        return data["episodes"]
+        """Back-compat alias for list_latents."""
+        return self.list_latents()
 
     def get_episode(self, episode_id: str) -> dict[str, Any]:
-        return self._request("GET", f"/episodes/{episode_id}")
+        """Back-compat alias for get_latent."""
+        return self.get_latent(episode_id)
 
     def search(self, text: str) -> list[dict[str, Any]]:
         data = self._request("POST", "/search", json={"text": text})
