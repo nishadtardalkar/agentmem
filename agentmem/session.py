@@ -4,7 +4,8 @@ from agentmem.bank import EpisodeBank, RetrievedBucket
 from agentmem.chunker import SemanticChunker
 from agentmem.config import MemoryConfig
 from agentmem.encoder import Encoder, HiddenStateEncoder
-from agentmem.readout import compose_prompt, format_memory_block
+from agentmem.keys import HeuristicKeyExtractor, KeyExtractor, ModelKeyExtractor
+from agentmem.readout import compose_messages, format_memory_block
 
 
 class MemorySession:
@@ -15,6 +16,7 @@ class MemorySession:
         config: MemoryConfig | None = None,
         encoder: Encoder | None = None,
         bank: EpisodeBank | None = None,
+        key_extractor: KeyExtractor | None = None,
     ) -> None:
         self.config = config or MemoryConfig()
         self.config.ensure_data_dir()
@@ -25,8 +27,20 @@ class MemorySession:
             device=self.config.encoder_device,
             dtype=self.config.encoder_dtype,
         )
+        if key_extractor is not None:
+            self.key_extractor = key_extractor
+        elif isinstance(self.encoder, HiddenStateEncoder):
+            self.key_extractor = ModelKeyExtractor(
+                self.encoder,
+                max_keys=self.config.max_key_tokens,
+            )
+        else:
+            self.key_extractor = HeuristicKeyExtractor(
+                max_keys=self.config.max_key_tokens,
+            )
         self.chunker = SemanticChunker(
             encoder=self.encoder,
+            key_extractor=self.key_extractor,
             tau_break=self.config.tau_break,
         )
         self.bank = bank or EpisodeBank(
@@ -35,7 +49,8 @@ class MemorySession:
             tau_upsert=self.config.tau_upsert,
         )
 
-    def pre(self, user_text: str) -> str:
+    def pre(self, user_text: str) -> list[dict[str, str]]:
+        """Retrieve memories, store the user half-turn, return chat messages."""
         query_keys = self.chunker.query_keys(user_text)
         hits = self.bank.search(
             query_keys,
@@ -49,7 +64,7 @@ class MemorySession:
         for episode in self.chunker.chunk(user_text, role="user"):
             self.bank.upsert(episode)
 
-        return compose_prompt(memory_block, user_text)
+        return compose_messages(memory_block, user_text)
 
     def post(self, assistant_text: str) -> None:
         for episode in self.chunker.chunk(assistant_text, role="assistant"):

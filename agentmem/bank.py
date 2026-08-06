@@ -32,7 +32,7 @@ class RetrievedBucket:
 
 
 class EpisodeBank:
-    """FAISS sentence keys → latent_id → [MemoryEntry, ...]."""
+    """FAISS token keys → latent_id → [MemoryEntry, ...]."""
 
     def __init__(self, dim: int, data_dir: Path, tau_upsert: float = 0.75) -> None:
         self.dim = dim

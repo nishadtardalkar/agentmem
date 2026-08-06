@@ -65,12 +65,11 @@ def load_main_llm(config):
 def generate_reply(
     tokenizer,
     model,
-    prompt: str,
+    messages: list[dict[str, str]],
     max_new_tokens: int = 512,
 ) -> str:
     import torch
 
-    messages = [{"role": "user", "content": prompt}]
     # Tokenize via the chat string so we always get an explicit attention_mask.
     # (pad_token == eos_token on Qwen, so generate cannot infer the mask.)
     chat_text = tokenizer.apply_chat_template(
@@ -164,7 +163,7 @@ def main() -> None:
             if not user_text:
                 break
             try:
-                augmented = client.pre(user_text)
+                messages = client.pre(user_text)
             except MemoryClientError as exc:
                 logger.exception("Memory /pre failed: %s", exc)
                 print(f"Memory /pre failed: {exc}", file=sys.stderr)
@@ -173,7 +172,7 @@ def main() -> None:
                 reply = f"[stub] Heard: {user_text[:120]}"
             else:
                 reply = generate_reply(
-                    tokenizer, model, augmented, max_new_tokens=args.max_new_tokens
+                    tokenizer, model, messages, max_new_tokens=args.max_new_tokens
                 )
             try:
                 client.post(reply)

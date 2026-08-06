@@ -44,9 +44,9 @@ class MemoryClient:
     def health(self) -> dict[str, Any]:
         return self._request("GET", "/health")
 
-    def pre(self, text: str) -> str:
+    def pre(self, text: str) -> list[dict[str, str]]:
         data = self._request("POST", "/pre", json={"text": text})
-        return data["prompt"]
+        return data["messages"]
 
     def post(self, text: str) -> None:
         self._request("POST", "/post", json={"text": text})

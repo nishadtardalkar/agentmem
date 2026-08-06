@@ -2,6 +2,12 @@ from __future__ import annotations
 
 from agentmem.bank import RetrievedBucket
 
+_SYSTEM_INTRO = (
+    "You are a helpful assistant. Recalled memories below are prior context from "
+    "earlier turns. They are NOT the user's current message — use them only as "
+    "background when relevant."
+)
+
 
 def format_memory_block(
     buckets: list[RetrievedBucket],
@@ -28,8 +34,24 @@ def format_memory_block(
     return "\n".join(lines)
 
 
+def compose_system_content(memory_block: str) -> str:
+    """System message: role of memory + optional recalled block."""
+    memory_block = memory_block.strip()
+    if not memory_block:
+        return _SYSTEM_INTRO
+    return f"{_SYSTEM_INTRO}\n\n{memory_block}"
+
+
+def compose_messages(memory_block: str, user_text: str) -> list[dict[str, str]]:
+    """Build chat messages with memory in system and live text as user."""
+    return [
+        {"role": "system", "content": compose_system_content(memory_block)},
+        {"role": "user", "content": user_text.strip()},
+    ]
+
+
 def compose_prompt(memory_block: str, user_text: str) -> str:
-    user_text = user_text.strip()
-    if not memory_block.strip():
-        return user_text
-    return f"{memory_block.strip()}\n\n{user_text}"
+    """Flat string for debug / back-compat; prefer compose_messages for the LLM."""
+    messages = compose_messages(memory_block, user_text)
+    parts = [f"[{m['role']}]\n{m['content']}" for m in messages]
+    return "\n\n".join(parts)

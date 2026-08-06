@@ -2,16 +2,16 @@
 
 Dual-path latent memory manager that sits before and after a main LLM.
 
-- **Pre-path:** retrieve related episodes via sentence-level hidden-state keys, augment the prompt, then chunk and store the user half-turn.
+- **Pre-path:** extract key tokens (via the encoder instruct model), retrieve related episodes from those token embeddings, return chat messages with memory in the **system** role and the live user text in the **user** role, then chunk and store the user half-turn.
 - **Post-path:** chunk and store the assistant half-turn (store only).
 
-Episodes are formed by semantic sentence breakpoints. Each sentence latent is a FAISS key; similar keys share a **latent bucket** whose value is an array of memory objects `{ts, role, text, sentences, ...}`.
+Episodes are formed by semantic sentence breakpoints. FAISS keys are embeddings of **model-extracted key tokens** (not whole-sentence vectors); similar keys share a **latent bucket** whose value is an array of memory objects `{ts, role, text, sentences, ...}`.
 
 ## H100 demo models
 
 | Role | Model | Precision |
 |------|--------|-----------|
-| Encoder | `Qwen/Qwen2.5-0.5B-Instruct` | bf16 |
+| Encoder + key extract | `Qwen/Qwen2.5-0.5B-Instruct` | bf16 |
 | Main LLM | `Qwen/Qwen2.5-32B-Instruct` | 4-bit NF4 (bitsandbytes) |
 
 ## Quick start
@@ -44,3 +44,8 @@ python -m experiments.memory_debug
 
 Memory server flags: `--host`, `--port`, `--data-dir`, `--encoder-device`.
 Chat / debug flag: `--memory-url` (default `http://127.0.0.1:8765`).
+
+### Upgrading from sentence-key indexes
+
+Token-key FAISS indexes are incompatible with older sentence-level keys. Clear the memory
+data directory (e.g. delete `data/memory`) before starting the server after this change.
