@@ -52,7 +52,7 @@ def create_app(session) -> FastAPI:
     @app.post("/pre")
     def pre(body: TextBody) -> dict:
         try:
-            messages = session.pre(body.text)
+            messages, keys = session.pre(body.text)
         except Exception:
             logger.exception(
                 "/pre failed (chars=%d preview=%r)",
@@ -60,7 +60,7 @@ def create_app(session) -> FastAPI:
                 _text_preview(body.text),
             )
             raise HTTPException(status_code=500, detail="/pre failed") from None
-        return {"messages": messages}
+        return {"messages": messages, "keys": keys}
 
     @app.post("/post")
     def post(body: TextBody) -> dict:

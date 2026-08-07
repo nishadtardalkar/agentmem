@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import numpy as np
+
 from agentmem.bank import EpisodeBank, RetrievedEpisode
 from agentmem.chunker import SemanticChunker
 from agentmem.compress import EpisodeCompressor, ModelEpisodeCompressor
@@ -54,9 +56,16 @@ class MemorySession:
             data_dir=self.config.data_dir,
         )
 
-    def pre(self, user_text: str) -> list[dict[str, str]]:
-        """Retrieve memories, store the user half-turn, return chat messages."""
-        query_keys = self.chunker.query_keys(user_text)
+    def pre(self, user_text: str) -> tuple[list[dict[str, str]], list[str]]:
+        """Retrieve memories, store the user half-turn.
+
+        Returns (chat messages, model-extracted query key tokens).
+        """
+        query_tokens = self.chunker.query_key_tokens(user_text)
+        if query_tokens:
+            query_keys = self.encoder.encode_many(query_tokens)
+        else:
+            query_keys = np.zeros((0, self.encoder.dim), dtype=np.float32)
         hits = self.bank.search(
             query_keys,
             top_k=self.config.retrieve_top_k,
@@ -69,7 +78,7 @@ class MemorySession:
         for episode in self.chunker.chunk(user_text, role="user"):
             self.bank.store(episode)
 
-        return compose_messages(memory_block, user_text)
+        return compose_messages(memory_block, user_text), query_tokens
 
     def post(self, assistant_text: str) -> None:
         for episode in self.chunker.chunk(assistant_text, role="assistant"):

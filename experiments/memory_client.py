@@ -44,9 +44,10 @@ class MemoryClient:
     def health(self) -> dict[str, Any]:
         return self._request("GET", "/health")
 
-    def pre(self, text: str) -> list[dict[str, str]]:
+    def pre(self, text: str) -> tuple[list[dict[str, str]], list[str]]:
+        """Returns (chat messages, model-extracted query key tokens)."""
         data = self._request("POST", "/pre", json={"text": text})
-        return data["messages"]
+        return data["messages"], list(data.get("keys") or [])
 
     def post(self, text: str) -> None:
         self._request("POST", "/post", json={"text": text})

@@ -125,12 +125,13 @@ def main() -> None:
             print(f"Turn {i}/{n}")
             print(f"You: {user_text}")
             try:
-                messages = client.pre(user_text)
+                messages, keys = client.pre(user_text)
             except MemoryClientError as exc:
                 logger.exception("Memory /pre failed: %s", exc)
                 print(f"Memory /pre failed: {exc}", file=sys.stderr)
                 continue
 
+            print(f"Keys: {keys if keys else '(none)'}")
             if not args.hide_memory:
                 mem = _memory_snippet(messages)
                 if mem:

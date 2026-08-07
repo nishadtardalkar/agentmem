@@ -58,8 +58,8 @@ class SemanticChunker:
         out = self.episode_compressor.compress(text).strip()
         return out or text
 
-    def _token_keys_for_texts(self, texts: list[str]) -> np.ndarray:
-        """Extract key tokens per text, embed, and stack unique rows."""
+    def extract_key_tokens(self, texts: list[str]) -> list[str]:
+        """Extract unique key tokens from texts (model/stub extractor)."""
         all_tokens: list[str] = []
         seen: set[str] = set()
         for text in texts:
@@ -68,6 +68,11 @@ class SemanticChunker:
                     continue
                 seen.add(token)
                 all_tokens.append(token)
+        return all_tokens
+
+    def _token_keys_for_texts(self, texts: list[str]) -> np.ndarray:
+        """Extract key tokens per text, embed, and stack unique rows."""
+        all_tokens = self.extract_key_tokens(texts)
         if not all_tokens:
             return np.zeros((0, self.encoder.dim), dtype=np.float32)
         return self.encoder.encode_many(all_tokens)
@@ -109,9 +114,16 @@ class SemanticChunker:
             episodes.append(self._episode_from_span(sentences[lo:hi], role))
         return episodes
 
-    def query_keys(self, text: str) -> np.ndarray:
-        """Extract key tokens from a query half-turn and embed them."""
+    def query_key_tokens(self, text: str) -> list[str]:
+        """Extract key token strings from a query half-turn."""
         sentences = split_sentences(text)
         if not sentences:
-            return self._token_keys_for_texts([text] if text.strip() else [])
-        return self._token_keys_for_texts(sentences)
+            return self.extract_key_tokens([text] if text.strip() else [])
+        return self.extract_key_tokens(sentences)
+
+    def query_keys(self, text: str) -> np.ndarray:
+        """Extract key tokens from a query half-turn and embed them."""
+        tokens = self.query_key_tokens(text)
+        if not tokens:
+            return np.zeros((0, self.encoder.dim), dtype=np.float32)
+        return self.encoder.encode_many(tokens)

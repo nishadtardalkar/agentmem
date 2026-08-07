@@ -163,7 +163,7 @@ def main() -> None:
             if not user_text:
                 break
             try:
-                messages = client.pre(user_text)
+                messages, _keys = client.pre(user_text)
             except MemoryClientError as exc:
                 logger.exception("Memory /pre failed: %s", exc)
                 print(f"Memory /pre failed: {exc}", file=sys.stderr)

@@ -251,15 +251,17 @@ def test_session_pre_post(
     )
 
     # First turn: nothing to retrieve
-    out1 = session.pre("I live in Boston.")
+    out1, keys1 = session.pre("I live in Boston.")
     assert out1[-1]["role"] == "user"
     assert out1[-1]["content"] == "I live in Boston."
     assert out1[0]["role"] == "system"
+    assert keys1  # model/stub extractor returns tokens
     session.post("Nice city.")
 
     # Second turn: shared token keys should retrieve prior episode
-    out2 = session.pre("Where do I live?")
+    out2, keys2 = session.pre("Where do I live?")
     assert out2[-1]["content"] == "Where do I live?"
     assert "Boston" in out2[0]["content"]
+    assert keys2
     assert bank.ntotal >= 1
     assert bank.episode_count() >= 2  # user + assistant already stored
