@@ -40,6 +40,8 @@ python -m experiments.memory_server --data-dir data/memory
 
 # terminal 2 — chat (talks to memory over HTTP)
 python -m experiments.interactive_chat
+# or scripted memory stress test (no typing):
+python -m experiments.auto_chat
 
 # terminal 3 — optional debug REPL (same API)
 python -m experiments.memory_debug
