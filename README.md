@@ -52,5 +52,6 @@ Chat / debug flag: `--memory-url` (default `http://127.0.0.1:8765`).
 
 ### Upgrading memory indexes
 
-Schema / key layout changes require a clean store. Clear the memory data directory
-(e.g. delete `data/memory`) before restarting the server after this change.
+Schema / key layout / embedding-pooling changes require a clean store. Clear the
+memory data directory (e.g. delete `data/memory`) before restarting the server
+after this change.

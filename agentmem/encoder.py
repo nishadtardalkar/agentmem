@@ -25,7 +25,11 @@ def l2_normalize(vectors: np.ndarray, eps: float = 1e-12) -> np.ndarray:
 
 
 class HiddenStateEncoder:
-    """Last-token hidden state from a small causal LM (bf16 by default)."""
+    """Masked sum of hidden states from a small causal LM (bf16 by default).
+
+    For short keys like ``dog's``, summing subword states keeps the noun signal
+    instead of last-token pooling onto ``'s``. After L2-normalize, sum == mean.
+    """
 
     def __init__(
         self,
@@ -93,11 +97,9 @@ class HiddenStateEncoder:
         with torch.no_grad():
             outputs = self.model(**encoded, output_hidden_states=True, use_cache=False)
             hidden = outputs.hidden_states[self.layer]  # (B, T, D)
-            attention = encoded["attention_mask"]
-            # last non-pad token index per row
-            lengths = attention.sum(dim=1) - 1
-            batch_idx = torch.arange(hidden.size(0), device=hidden.device)
-            vectors = hidden[batch_idx, lengths].float().cpu().numpy()
+            mask = encoded["attention_mask"].unsqueeze(-1).to(hidden.dtype)  # (B, T, 1)
+            summed = (hidden * mask).sum(dim=1)  # (B, D)
+            vectors = summed.float().cpu().numpy()
 
         return l2_normalize(vectors).astype(np.float32)
 
