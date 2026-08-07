@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from agentmem.bank import EpisodeBank, RetrievedEpisode
 from agentmem.chunker import SemanticChunker
+from agentmem.compress import EpisodeCompressor, ModelEpisodeCompressor
 from agentmem.config import MemoryConfig
 from agentmem.encoder import Encoder, HiddenStateEncoder
-from agentmem.keys import HeuristicKeyExtractor, KeyExtractor, ModelKeyExtractor
+from agentmem.keys import KeyExtractor, ModelKeyExtractor
 from agentmem.readout import compose_messages, format_memory_block
 
 
@@ -17,6 +18,7 @@ class MemorySession:
         encoder: Encoder | None = None,
         bank: EpisodeBank | None = None,
         key_extractor: KeyExtractor | None = None,
+        episode_compressor: EpisodeCompressor | None = None,
     ) -> None:
         self.config = config or MemoryConfig()
         self.config.ensure_data_dir()
@@ -30,18 +32,22 @@ class MemorySession:
         if key_extractor is not None:
             self.key_extractor = key_extractor
         elif isinstance(self.encoder, HiddenStateEncoder):
-            self.key_extractor = ModelKeyExtractor(
-                self.encoder,
-                max_keys=self.config.max_key_tokens,
-            )
+            self.key_extractor = ModelKeyExtractor(self.encoder)
         else:
-            self.key_extractor = HeuristicKeyExtractor(
-                max_keys=self.config.max_key_tokens,
+            raise TypeError(
+                "key_extractor is required unless encoder is HiddenStateEncoder"
             )
+        if episode_compressor is not None:
+            self.episode_compressor = episode_compressor
+        elif isinstance(self.encoder, HiddenStateEncoder):
+            self.episode_compressor = ModelEpisodeCompressor(self.encoder)
+        else:
+            self.episode_compressor = None
         self.chunker = SemanticChunker(
             encoder=self.encoder,
             key_extractor=self.key_extractor,
             tau_break=self.config.tau_break,
+            episode_compressor=self.episode_compressor,
         )
         self.bank = bank or EpisodeBank(
             dim=self.encoder.dim,

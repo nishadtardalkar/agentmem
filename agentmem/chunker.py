@@ -7,8 +7,9 @@ from typing import Literal
 
 import numpy as np
 
+from agentmem.compress import EpisodeCompressor
 from agentmem.encoder import Encoder
-from agentmem.keys import HeuristicKeyExtractor, KeyExtractor
+from agentmem.keys import KeyExtractor
 
 Role = Literal["user", "assistant"]
 
@@ -46,8 +47,16 @@ class SemanticChunker:
     """Sentence-split a half-turn; break on sentence cosine; index via key tokens."""
 
     encoder: Encoder
-    key_extractor: KeyExtractor = field(default_factory=HeuristicKeyExtractor)
+    key_extractor: KeyExtractor
     tau_break: float = 0.75
+    episode_compressor: EpisodeCompressor | None = None
+
+    def _compress(self, text: str) -> str:
+        text = text.strip()
+        if not text or self.episode_compressor is None:
+            return text
+        out = self.episode_compressor.compress(text).strip()
+        return out or text
 
     def _token_keys_for_texts(self, texts: list[str]) -> np.ndarray:
         """Extract key tokens per text, embed, and stack unique rows."""
@@ -63,6 +72,20 @@ class SemanticChunker:
             return np.zeros((0, self.encoder.dim), dtype=np.float32)
         return self.encoder.encode_many(all_tokens)
 
+    def _episode_from_span(self, span_sents: list[str], role: Role) -> Episode:
+        raw_text = " ".join(span_sents)
+        text = self._compress(raw_text)
+        if text == raw_text:
+            stored_sents = list(span_sents)
+        else:
+            stored_sents = split_sentences(text) or [text]
+        return Episode(
+            role=role,
+            text=text,
+            sentences=stored_sents,
+            keys=self._token_keys_for_texts([text]),
+        )
+
     def chunk(self, text: str, role: Role) -> list[Episode]:
         sentences = split_sentences(text)
         if not sentences:
@@ -71,14 +94,7 @@ class SemanticChunker:
         # Sentence embeddings drive tau_break only; FAISS keys are token embeddings.
         sentence_latents = self.encoder.encode_many(sentences)
         if len(sentences) == 1:
-            return [
-                Episode(
-                    role=role,
-                    text=sentences[0],
-                    sentences=sentences,
-                    keys=self._token_keys_for_texts(sentences),
-                )
-            ]
+            return [self._episode_from_span(sentences, role)]
 
         spans: list[tuple[int, int]] = []
         start = 0
@@ -90,15 +106,7 @@ class SemanticChunker:
 
         episodes: list[Episode] = []
         for lo, hi in spans:
-            span_sents = sentences[lo:hi]
-            episodes.append(
-                Episode(
-                    role=role,
-                    text=" ".join(span_sents),
-                    sentences=list(span_sents),
-                    keys=self._token_keys_for_texts(span_sents),
-                )
-            )
+            episodes.append(self._episode_from_span(sentences[lo:hi], role))
         return episodes
 
     def query_keys(self, text: str) -> np.ndarray:

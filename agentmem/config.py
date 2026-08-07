@@ -17,7 +17,6 @@ class MemoryConfig:
     tau_break: float = 0.75
     tau_retrieve: float = 0.70
     retrieve_top_k: int = 5
-    max_key_tokens: int = 8
 
     data_dir: Path = field(default_factory=lambda: Path("data/memory"))
     max_readout_chars: int = 2000

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
+from typing import Sequence
 
 import numpy as np
 import pytest
@@ -11,10 +13,26 @@ from agentmem.bank import EpisodeBank, MemoryEntry, RetrievedEpisode
 from agentmem.chunker import Episode, SemanticChunker, split_sentences
 from agentmem.config import MemoryConfig
 from agentmem.encoder import HashEncoder, l2_normalize
-from agentmem.keys import HeuristicKeyExtractor, heuristic_keys, _parse_key_list
+from agentmem.keys import _parse_key_list
 from agentmem.readout import compose_messages, compose_prompt, format_memory_block
 from agentmem.session import MemorySession
 
+
+class StubKeyExtractor:
+    """Deterministic keys for unit tests (no LLM)."""
+
+    def extract(self, text: str) -> list[str]:
+        seen: set[str] = set()
+        out: list[str] = []
+        for match in re.findall(r"[a-z0-9]+", text.lower()):
+            if match in seen:
+                continue
+            seen.add(match)
+            out.append(match)
+        return out
+
+    def extract_many(self, texts: Sequence[str]) -> list[list[str]]:
+        return [self.extract(t) for t in texts]
 
 @pytest.fixture
 def encoder() -> HashEncoder:
@@ -22,8 +40,8 @@ def encoder() -> HashEncoder:
 
 
 @pytest.fixture
-def key_extractor() -> HeuristicKeyExtractor:
-    return HeuristicKeyExtractor(max_keys=8)
+def key_extractor() -> StubKeyExtractor:
+    return StubKeyExtractor()
 
 
 @pytest.fixture
@@ -44,20 +62,12 @@ def test_l2_normalize_unit():
     assert abs(float(np.linalg.norm(n)) - 1.0) < 1e-5
 
 
-def test_heuristic_keys_drops_stopwords():
-    keys = heuristic_keys("I live in Boston.", max_keys=8)
-    assert "live" in keys
-    assert "boston" in keys
-    assert "i" not in keys
-    assert "in" not in keys
-
-
 def test_parse_key_list_from_prose():
     raw = 'Sure: ["boston", "live"]'
-    assert _parse_key_list(raw, max_keys=8) == ["boston", "live"]
+    assert _parse_key_list(raw) == ["boston", "live"]
 
 
-def test_chunker_single_sentence(encoder: HashEncoder, key_extractor: HeuristicKeyExtractor):
+def test_chunker_single_sentence(encoder: HashEncoder, key_extractor: StubKeyExtractor):
     chunker = SemanticChunker(
         encoder=encoder, key_extractor=key_extractor, tau_break=0.99
     )
@@ -69,7 +79,7 @@ def test_chunker_single_sentence(encoder: HashEncoder, key_extractor: HeuristicK
 
 
 def test_chunker_breaks_on_low_similarity(
-    encoder: HashEncoder, key_extractor: HeuristicKeyExtractor
+    encoder: HashEncoder, key_extractor: StubKeyExtractor
 ):
     # Force break by using tau_break above any realistic sentence cosine
     chunker = SemanticChunker(
@@ -79,6 +89,30 @@ def test_chunker_breaks_on_low_similarity(
     eps = chunker.chunk(text, role="user")
     assert len(eps) == 2
     assert all(ep.keys.ndim == 2 for ep in eps)
+
+
+def test_chunker_compresses_before_store(
+    encoder: HashEncoder, key_extractor: StubKeyExtractor
+):
+    class FixedCompressor:
+        def compress(self, text: str) -> str:
+            return "Nishad is a coder. Sam is a singer. Tom is a pilot."
+
+    chunker = SemanticChunker(
+        encoder=encoder,
+        key_extractor=key_extractor,
+        tau_break=-1.0,  # keep one episode so compression is the focus
+        episode_compressor=FixedCompressor(),
+    )
+    raw = (
+        "I am Nishad. Im a coder. I have a friend sam who is a singer "
+        "and a friend tom who is a pilot."
+    )
+    eps = chunker.chunk(raw, role="user")
+    assert len(eps) == 1
+    assert eps[0].text == "Nishad is a coder. Sam is a singer. Tom is a pilot."
+    assert "nishad" in key_extractor.extract(eps[0].text)
+    assert raw not in eps[0].text
 
 
 def test_bank_insert_and_retrieve(tmp_bank: EpisodeBank, encoder: HashEncoder):
@@ -182,7 +216,7 @@ def test_readout_compose_messages():
 
 
 def test_query_keys_overlap_store_keys(
-    encoder: HashEncoder, key_extractor: HeuristicKeyExtractor, tmp_path: Path
+    encoder: HashEncoder, key_extractor: StubKeyExtractor, tmp_path: Path
 ):
     """Shared subject tokens should retrieve across statement vs question form."""
     chunker = SemanticChunker(
@@ -202,7 +236,9 @@ def test_query_keys_overlap_store_keys(
     assert "Boston" in hits[0].entry.text
 
 
-def test_session_pre_post(tmp_path: Path, encoder: HashEncoder):
+def test_session_pre_post(
+    tmp_path: Path, encoder: HashEncoder, key_extractor: StubKeyExtractor
+):
     config = MemoryConfig(
         data_dir=tmp_path / "session",
         tau_break=1.01,
@@ -210,7 +246,9 @@ def test_session_pre_post(tmp_path: Path, encoder: HashEncoder):
         retrieve_top_k=5,
     )
     bank = EpisodeBank(dim=encoder.dim, data_dir=config.data_dir)
-    session = MemorySession(config=config, encoder=encoder, bank=bank)
+    session = MemorySession(
+        config=config, encoder=encoder, bank=bank, key_extractor=key_extractor
+    )
 
     # First turn: nothing to retrieve
     out1 = session.pre("I live in Boston.")
