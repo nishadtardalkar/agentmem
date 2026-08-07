@@ -7,9 +7,11 @@ from typing import Protocol, Sequence
 _JSON_LIST_RE = re.compile(r"\[[\s\S]*?\]")
 
 _EXTRACT_SYSTEM = (
-    "Extract the most important key tokens for memory retrieval from the text. "
-    "Return ONLY a JSON array of short lowercase strings (entities, topics, "
-    "salient nouns). No prose."
+    "Extract key tokens for memory retrieval from the text. "
+    "Include the subject (including pronouns like i/you/he/she/we/they), "
+    "main verbs, and salient nouns/entities/places. "
+    "Drop function words (articles, prepositions, auxiliaries, conjunctions). "
+    "Return ONLY a JSON array of short lowercase strings. No prose."
 )
 
 
